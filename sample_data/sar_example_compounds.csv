@@ -1,0 +1,6 @@
+compound_id,smiles,ic50_nm,clint_ul_min_mg
+SAR-001,COc1ccc2nc(S(N)(=O)=O)sc2c1,120,22
+SAR-002,CCOc1ccc2nc(S(N)(=O)=O)sc2c1,35,38
+SAR-003,CC(C)Oc1ccc2nc(S(N)(=O)=O)sc2c1,18,62
+SAR-004,CN1CCN(c2ccc(Cl)cc2)CC1,900,12
+SAR-005,CN1CCN(c2ccc(F)cc2)CC1,260,16

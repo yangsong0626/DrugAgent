@@ -1,0 +1,6 @@
+compound_id,smiles,assay_ic50_nm
+Example-001,CCOc1ccc2nc(S(N)(=O)=O)sc2c1,42
+Example-002,COc1ccc2nc(S(N)(=O)=O)sc2c1,88
+Example-003,CCN(CC)CCOC(=O)c1ccc(N)cc1,310
+Example-004,CC(C)Oc1ccc2nc(S(N)(=O)=O)sc2c1,55
+Example-005,CN1CCN(CC1)c1ccc(Cl)cc1,740
