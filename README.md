@@ -2,7 +2,7 @@
 
 First MVP for uploading compound CSV/SDF data or patent PDFs with text-encoded SMILES, calculating RDKit descriptors, clustering by Morgan fingerprint similarity, reviewing structures in a React table, generating analog design proposals, exporting selected compounds, and building briefing reports.
 
-Patent PDF extraction currently imports valid SMILES found in selectable PDF text, such as examples tables or `SMILES:` fields. Image-only chemical drawings still need OCR or structure-image extraction before import.
+Patent PDF extraction imports valid SMILES found in selectable PDF text, such as examples tables or `SMILES:` fields. For image-based PDFs, the backend falls back to OCR when Tesseract is installed and can recognize text-encoded SMILES from rendered page images. Pure chemical drawings still need structure-image extraction before import.
 
 ## Backend
 
@@ -41,7 +41,9 @@ curl -X POST http://localhost:8000/api/uploads/csv-sdf \
   -F "file=@patent.pdf"
 ```
 
-The parser extracts text page-by-page, prioritizes labeled `SMILES:` entries, validates candidates with RDKit, de-duplicates canonical structures, and stores PDF page/snippet metadata on each imported compound.
+The parser extracts selectable text page-by-page, prioritizes labeled `SMILES:` entries, validates candidates with RDKit, de-duplicates canonical structures, and stores PDF page/snippet metadata on each imported compound.
+
+If no selectable SMILES are found, the backend attempts OCR on rendered PDF page images using Tesseract plus `pytesseract`/PyMuPDF. OCR can recover text-encoded SMILES embedded in image scans, but it does not convert structure drawings into SMILES.
 
 ## SAR Summary
 

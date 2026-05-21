@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -80,19 +82,62 @@ def parse_sdf(path: Path, source_filename: str, upload_id: str) -> tuple[list[di
 
 def parse_patent_pdf(path: Path, source_filename: str, upload_id: str) -> tuple[list[dict[str, Any]], int]:
     pages = _extract_pdf_pages(path)
-    if not any(text.strip() for _, text in pages):
+    records, skipped, seen_smiles = _records_from_pdf_pages(pages, upload_id, source_filename)
+    if records:
+        return records, skipped
+
+    ocr_pages, ocr_note = _extract_pdf_pages_with_ocr(path)
+    if ocr_pages:
+        ocr_records, ocr_skipped, _ = _records_from_pdf_pages(
+            ocr_pages,
+            upload_id,
+            source_filename,
+            seen_smiles=seen_smiles,
+            method_prefix="ocr_",
+        )
+        records.extend(ocr_records)
+        skipped += ocr_skipped
+        if records:
+            return records, skipped
+
+    if not records:
+        if not any(text.strip() for _, text in pages):
+            detail = (
+                "Could not extract selectable text from this PDF. "
+                f"{ocr_note} "
+                "If the compounds are only chemical drawings without text-encoded SMILES, use CSV/SDF export or a "
+                "structure-image extraction tool."
+            )
+            raise ValueError(detail.strip())
         raise ValueError(
-            "Could not extract text from this PDF. Image-only patent PDFs need OCR or structure-image extraction, "
-            "which is not available in this intake path yet."
+            "No valid text-encoded SMILES were found in this patent PDF. "
+            f"{ocr_note} "
+            "If the compounds are only shown as drawings, use CSV/SDF export or a structure-image extraction tool."
         )
 
+    return records, skipped
+
+
+def _records_from_pdf_pages(
+    pages: list[tuple[int, str]],
+    upload_id: str,
+    source_filename: str,
+    seen_smiles: set[str] | None = None,
+    method_prefix: str = "",
+) -> tuple[list[dict[str, Any]], int, set[str]]:
     records: list[dict[str, Any]] = []
     skipped = 0
-    seen_smiles: set[str] = set()
+    seen_smiles = seen_smiles or set()
 
     for page_number, text in pages:
         for candidate in _smiles_candidates(text):
-            mol = mol_from_smiles(candidate["smiles"])
+            mol = None
+            parsed_smiles = candidate["smiles"]
+            for smiles_variant in _smiles_candidate_variants(candidate["smiles"]):
+                mol = mol_from_smiles(smiles_variant)
+                if mol is not None:
+                    parsed_smiles = smiles_variant
+                    break
             if mol is None:
                 skipped += 1
                 continue
@@ -106,18 +151,14 @@ def parse_patent_pdf(path: Path, source_filename: str, upload_id: str) -> tuple[
             name = candidate.get("name") or f"PDF-p{page_number}-{len(records) + 1}"
             properties = {
                 "pdf_page": page_number,
-                "extraction_method": candidate["method"],
+                "extraction_method": f"{method_prefix}{candidate['method']}",
                 "source_snippet": candidate["snippet"],
             }
+            if parsed_smiles != candidate["smiles"]:
+                properties["ocr_corrected_smiles_token"] = candidate["smiles"]
             records.append(_build_record(upload_id, source_filename, mol, name, properties))
 
-    if not records:
-        raise ValueError(
-            "No valid text-encoded SMILES were found in this patent PDF. If the compounds are only shown as drawings, "
-            "use CSV/SDF export from the patent workflow or add OCR/structure-image extraction."
-        )
-
-    return records, skipped
+    return records, skipped, seen_smiles
 
 
 def _build_record(
@@ -152,6 +193,39 @@ def _extract_pdf_pages(path: Path) -> list[tuple[int, str]]:
         text = page.extract_text() or ""
         pages.append((index, _normalize_pdf_text(text)))
     return pages
+
+
+def _extract_pdf_pages_with_ocr(path: Path) -> tuple[list[tuple[int, str]], str]:
+    if shutil.which("tesseract") is None:
+        return [], "OCR fallback is unavailable because the tesseract executable is not installed."
+
+    try:
+        import fitz  # type: ignore
+        import pytesseract  # type: ignore
+        from PIL import Image  # type: ignore
+    except ImportError as exc:
+        return [], f"OCR fallback is unavailable because {exc.name or 'an OCR dependency'} is not installed."
+
+    pages: list[tuple[int, str]] = []
+    try:
+        document = fitz.open(str(path))
+    except Exception as exc:
+        return [], f"OCR fallback could not open this PDF: {exc}."
+
+    try:
+        for index, page in enumerate(document, start=1):
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            image = Image.open(io.BytesIO(pixmap.tobytes("png")))
+            text = pytesseract.image_to_string(image, config="--psm 6")
+            pages.append((index, _normalize_pdf_text(text)))
+    except Exception as exc:
+        return [], f"OCR fallback failed while reading page images: {exc}."
+    finally:
+        document.close()
+
+    if not any(text.strip() for _, text in pages):
+        return [], "OCR fallback ran, but no text was recognized from the page images."
+    return pages, "OCR fallback ran on rendered page images."
 
 
 def _normalize_pdf_text(text: str) -> str:
@@ -197,6 +271,15 @@ def _smiles_candidates(text: str) -> list[dict[str, str]]:
 
 def _clean_smiles_token(token: str) -> str:
     return token.strip().strip(".,;:)]}>\"'")
+
+
+def _smiles_candidate_variants(smiles: str) -> list[str]:
+    variants = [smiles]
+    ocr_ring_digit_variant = re.sub(r"(?<=[cnops])i(?=[cnops])", "1", smiles)
+    ocr_ring_digit_variant = re.sub(r"(?<=[cnops])I(?=[cnops])", "1", ocr_ring_digit_variant)
+    if ocr_ring_digit_variant != smiles:
+        variants.append(ocr_ring_digit_variant)
+    return variants
 
 
 def _looks_like_smiles(token: str) -> bool:
