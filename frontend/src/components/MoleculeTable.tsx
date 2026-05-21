@@ -204,7 +204,7 @@ export function MoleculeTable({ uploadId, molecules, onMoleculesChange }: Molecu
             {molecules.length === 0 && (
               <tr>
                 <td colSpan={11} className="empty-state">
-                  Upload CSV or SDF compounds to populate the table.
+                  Upload CSV, SDF, or patent PDF compounds to populate the table.
                 </td>
               </tr>
             )}

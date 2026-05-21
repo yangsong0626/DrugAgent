@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 import shutil
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +27,23 @@ SMILES_LABEL_RE = re.compile(
 COMPOUND_LABEL_RE = re.compile(r"(?:compound|example)\s+([A-Za-z0-9\-_.]+)", re.IGNORECASE)
 SMILES_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9@+\-\[\]\(\)\\/%=#$.:])([A-Za-z0-9@+\-\[\]\(\)\\/%=#$.:]{4,})(?![A-Za-z0-9@+\-\[\]\(\)\\/%=#$.:])")
 ORGANIC_ATOM_RE = re.compile(r"Br|Cl|Si|Na|Li|Mg|Al|Ca|[BCNOPSFIbcnops]")
+IUPAC_LABEL_RE = re.compile(
+    r"(?:IUPAC(?:\s+name)?|chemical\s+name|compound\s+name|preferred\s+name)\s*[:=]\s*"
+    r"(?P<name>[A-Za-z0-9][A-Za-z0-9,\-\s\(\)\[\]'\/]{5,240}?)"
+    r"(?=(?:\s+(?:SMILES|Canonical\s+SMILES|IUPAC|Chemical\s+name|Compound\s+name|Example|Compound|Table|Figure|Scheme|Claim)\b)|[.;]|$)",
+    re.IGNORECASE,
+)
+EXAMPLE_NAME_RE = re.compile(
+    r"(?:Example|Compound)\s+(?P<label>[A-Za-z0-9\-_.]+)\s*[:\-]\s*"
+    r"(?P<name>[A-Za-z0-9][A-Za-z0-9,\-\s\(\)\[\]'\/]{8,240}?)"
+    r"(?=(?:\s+(?:SMILES|Canonical\s+SMILES|IUPAC|Chemical\s+name|Compound\s+name|Example|Compound|Table|Figure|Scheme|Claim|Step)\b)|[.;]|$)",
+    re.IGNORECASE,
+)
+IUPAC_NAME_HINT_RE = re.compile(
+    r"yl|ane|ene|yne|one|ol|acid|amide|amine|benz|pyr|imid|azol|chloro|fluoro|bromo|iodo|methyl|ethyl|propyl|hydroxy|oxo|carbox",
+    re.IGNORECASE,
+)
+NAME_TO_SMILES_CACHE: dict[str, str | None] = {}
 
 
 def parse_upload_file(path: Path, source_filename: str, upload_id: str) -> tuple[list[dict[str, Any]], int]:
@@ -86,6 +107,12 @@ def parse_patent_pdf(path: Path, source_filename: str, upload_id: str) -> tuple[
     if records:
         return records, skipped
 
+    name_records, name_skipped, seen_smiles = _records_from_iupac_pages(pages, upload_id, source_filename, seen_smiles=seen_smiles)
+    records.extend(name_records)
+    skipped += name_skipped
+    if records:
+        return records, skipped
+
     ocr_pages, ocr_note = _extract_pdf_pages_with_ocr(path)
     if ocr_pages:
         ocr_records, ocr_skipped, _ = _records_from_pdf_pages(
@@ -100,17 +127,29 @@ def parse_patent_pdf(path: Path, source_filename: str, upload_id: str) -> tuple[
         if records:
             return records, skipped
 
+        ocr_name_records, ocr_name_skipped, _ = _records_from_iupac_pages(
+            ocr_pages,
+            upload_id,
+            source_filename,
+            seen_smiles=seen_smiles,
+            method_prefix="ocr_",
+        )
+        records.extend(ocr_name_records)
+        skipped += ocr_name_skipped
+        if records:
+            return records, skipped
+
     if not records:
         if not any(text.strip() for _, text in pages):
             detail = (
                 "Could not extract selectable text from this PDF. "
                 f"{ocr_note} "
-                "If the compounds are only chemical drawings without text-encoded SMILES, use CSV/SDF export or a "
+                "If the compounds are only chemical drawings without text-encoded SMILES or IUPAC names, use CSV/SDF export or a "
                 "structure-image extraction tool."
             )
             raise ValueError(detail.strip())
         raise ValueError(
-            "No valid text-encoded SMILES were found in this patent PDF. "
+            "No valid text-encoded SMILES or resolvable IUPAC names were found in this patent PDF. "
             f"{ocr_note} "
             "If the compounds are only shown as drawings, use CSV/SDF export or a structure-image extraction tool."
         )
@@ -156,6 +195,43 @@ def _records_from_pdf_pages(
             }
             if parsed_smiles != candidate["smiles"]:
                 properties["ocr_corrected_smiles_token"] = candidate["smiles"]
+            records.append(_build_record(upload_id, source_filename, mol, name, properties))
+
+    return records, skipped, seen_smiles
+
+
+def _records_from_iupac_pages(
+    pages: list[tuple[int, str]],
+    upload_id: str,
+    source_filename: str,
+    seen_smiles: set[str] | None = None,
+    method_prefix: str = "",
+) -> tuple[list[dict[str, Any]], int, set[str]]:
+    records: list[dict[str, Any]] = []
+    skipped = 0
+    seen_smiles = seen_smiles or set()
+
+    for page_number, text in pages:
+        for candidate in _iupac_candidates(text):
+            mol = _mol_from_iupac_name(candidate["iupac_name"])
+            if mol is None:
+                skipped += 1
+                continue
+
+            canonical = canonical_smiles(mol)
+            if canonical in seen_smiles:
+                skipped += 1
+                continue
+            seen_smiles.add(canonical)
+
+            name = candidate.get("name") if candidate["method"].startswith("example_") else candidate["iupac_name"]
+            properties = {
+                "pdf_page": page_number,
+                "extraction_method": f"{method_prefix}{candidate['method']}",
+                "iupac_name": candidate["iupac_name"],
+                "name_to_structure_resolver": "pubchem_pug_rest",
+                "source_snippet": candidate["snippet"],
+            }
             records.append(_build_record(upload_id, source_filename, mol, name, properties))
 
     return records, skipped, seen_smiles
@@ -269,8 +345,49 @@ def _smiles_candidates(text: str) -> list[dict[str, str]]:
     return candidates
 
 
+def _iupac_candidates(text: str) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    for match in IUPAC_LABEL_RE.finditer(text):
+        name = _clean_iupac_name(match.group("name"))
+        if not name or name.lower() in seen or not _looks_like_iupac_name(name):
+            continue
+        seen.add(name.lower())
+        candidates.append(
+            {
+                "iupac_name": name,
+                "name": _nearby_compound_label(text, match.start()),
+                "method": "labeled_iupac_name",
+                "snippet": _snippet(text, match.start(), match.end()),
+            }
+        )
+
+    for match in EXAMPLE_NAME_RE.finditer(text):
+        name = _clean_iupac_name(match.group("name"))
+        if not name or name.lower() in seen or not _looks_like_iupac_name(name):
+            continue
+        seen.add(name.lower())
+        candidates.append(
+            {
+                "iupac_name": name,
+                "name": f"Example {match.group('label')}",
+                "method": "example_iupac_name_candidate",
+                "snippet": _snippet(text, match.start(), match.end()),
+            }
+        )
+
+    return candidates
+
+
 def _clean_smiles_token(token: str) -> str:
     return token.strip().strip(".,;:)]}>\"'")
+
+
+def _clean_iupac_name(name: str) -> str:
+    name = re.sub(r"\s+", " ", name)
+    name = re.sub(r"\s+(?:was|were|is|are|can be|may be|prepared|obtained)\b.*$", "", name, flags=re.IGNORECASE)
+    return name.strip().strip(".,;:)]}>\"'")
 
 
 def _smiles_candidate_variants(smiles: str) -> list[str]:
@@ -280,6 +397,46 @@ def _smiles_candidate_variants(smiles: str) -> list[str]:
     if ocr_ring_digit_variant != smiles:
         variants.append(ocr_ring_digit_variant)
     return variants
+
+
+def _looks_like_iupac_name(name: str) -> bool:
+    if len(name) < 6 or len(name) > 240:
+        return False
+    if name.lower().startswith(("was ", "were ", "table ", "figure ", "scheme ", "claim ", "step ")):
+        return False
+    if re.search(r"https?://|www\.|@", name, re.IGNORECASE):
+        return False
+    if not IUPAC_NAME_HINT_RE.search(name):
+        return False
+    return bool(re.search(r"[\d,\-\(\)\[\]]", name) or len(name.split()) <= 5)
+
+
+def _mol_from_iupac_name(name: str) -> Chem.Mol | None:
+    smiles = _resolve_name_to_smiles(name)
+    return mol_from_smiles(smiles) if smiles else None
+
+
+def _resolve_name_to_smiles(name: str) -> str | None:
+    cache_key = name.strip().lower()
+    if cache_key in NAME_TO_SMILES_CACHE:
+        return NAME_TO_SMILES_CACHE[cache_key]
+
+    encoded_name = urllib.parse.quote(name.strip(), safe="")
+    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_name}/property/CanonicalSMILES/JSON"
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "DrugAgent/0.1"})
+        with urllib.request.urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError):
+        NAME_TO_SMILES_CACHE[cache_key] = None
+        return None
+
+    properties = payload.get("PropertyTable", {}).get("Properties", [])
+    smiles = None
+    if properties:
+        smiles = properties[0].get("CanonicalSMILES") or properties[0].get("ConnectivitySMILES")
+    NAME_TO_SMILES_CACHE[cache_key] = str(smiles) if smiles else None
+    return NAME_TO_SMILES_CACHE[cache_key]
 
 
 def _looks_like_smiles(token: str) -> bool:
