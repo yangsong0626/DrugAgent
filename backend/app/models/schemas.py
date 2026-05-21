@@ -114,6 +114,45 @@ class CompoundDesignIdeasResponse(BaseModel):
     context: Dict[str, Any] = Field(default_factory=dict)
 
 
+class DesignSpaceRequest(BaseModel):
+    upload_id: str
+    target_count: int = Field(default=12000, ge=1000, le=15000)
+    cluster_count: Optional[int] = Field(default=None, ge=2, le=60)
+
+
+class DesignSpacePoint(BaseModel):
+    id: int
+    name: str
+    smiles: str
+    source_molecule_id: int
+    source_molecule_name: Optional[str] = None
+    x: float
+    y: float
+    cluster_id: int
+    score: float
+    properties: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DesignSpaceCluster(BaseModel):
+    cluster_id: int
+    size: int
+    centroid_x: float
+    centroid_y: float
+    avg_score: float
+    representative: DesignSpacePoint
+
+
+class DesignSpaceResponse(BaseModel):
+    upload_id: str
+    requested_count: int
+    generated_count: int
+    projection_method: str
+    cluster_count: int
+    clusters: List[DesignSpaceCluster]
+    points: List[DesignSpacePoint]
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class SarSummaryRequest(BaseModel):
     upload_id: Optional[str] = None
     molecule_ids: List[int] = Field(default_factory=list)

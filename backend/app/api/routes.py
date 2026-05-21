@@ -15,6 +15,8 @@ from app.models.schemas import (
     BriefingReportRequest,
     BriefingReportResponse,
     CompoundDesignIdeasResponse,
+    DesignSpaceRequest,
+    DesignSpaceResponse,
     ExportRequest,
     MoleculeRecord,
     PortfolioInsightsResponse,
@@ -24,6 +26,7 @@ from app.models.schemas import (
 )
 from app.services.clustering import cluster_molecules
 from app.services.design_ideas import generate_design_ideas
+from app.services.design_space import generate_design_space
 from app.services.exporters import molecules_to_csv, molecules_to_sdf
 from app.services.portfolio_insights import generate_portfolio_insights
 from app.services.report_generator import build_briefing_docx, build_briefing_report
@@ -108,6 +111,23 @@ def portfolio_insights(upload_id: Optional[str] = Query(default=None)) -> Portfo
     if not molecules:
         raise HTTPException(status_code=400, detail="Upload compounds before generating portfolio insights.")
     return PortfolioInsightsResponse(**generate_portfolio_insights(molecules))
+
+
+@router.post("/design/space", response_model=DesignSpaceResponse)
+def create_design_space(request: DesignSpaceRequest) -> DesignSpaceResponse:
+    molecules = list_molecules(request.upload_id)
+    if not molecules:
+        raise HTTPException(status_code=400, detail="Upload compounds before generating a design space.")
+    try:
+        design_space = generate_design_space(
+            molecules=molecules,
+            upload_id=request.upload_id,
+            target_count=request.target_count,
+            cluster_count=request.cluster_count,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DesignSpaceResponse(**design_space)
 
 
 @router.post("/exports/compounds")

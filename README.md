@@ -67,6 +67,16 @@ The response includes key SAR trends, risky modifications, promising positions, 
 
 Try `sample_data/sar_example_compounds.csv` for a quick SAR-specific check.
 
+## Design Space
+
+After uploading compounds, the Design tab can enumerate more than 10k analog candidates from aromatic vectors in the uploaded structures, cluster the generated library, project it into a t-SNE design map, and show a representative structure for each cluster.
+
+```bash
+curl -X POST http://localhost:8000/api/design/space \
+  -H "Content-Type: application/json" \
+  -d '{"upload_id":"UPLOAD_ID","target_count":12000}'
+```
+
 ## Briefing Report Export
 
 Generate a medicinal chemistry briefing report as JSON-backed Markdown:

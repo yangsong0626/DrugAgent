@@ -1,11 +1,12 @@
-import { FlaskConical, FileText, UploadCloud } from "lucide-react";
+import { FlaskConical, FileText, Network, UploadCloud } from "lucide-react";
 import { useMemo, useState } from "react";
 import { MoleculeTable } from "./components/MoleculeTable";
+import { DesignPage } from "./pages/DesignPage";
 import { ReportPage } from "./pages/ReportPage";
 import { UploadPage } from "./pages/UploadPage";
 import type { MoleculeRecord } from "./types/molecule";
 
-type Tab = "upload" | "molecules" | "report";
+type Tab = "upload" | "molecules" | "design" | "report";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("upload");
@@ -36,6 +37,10 @@ export default function App() {
             <FlaskConical size={18} />
             Molecules
           </button>
+          <button className={activeTab === "design" ? "active" : ""} onClick={() => setActiveTab("design")}>
+            <Network size={18} />
+            Design
+          </button>
           <button className={activeTab === "report" ? "active" : ""} onClick={() => setActiveTab("report")}>
             <FileText size={18} />
             Report
@@ -54,6 +59,7 @@ export default function App() {
           />
         )}
         {activeTab === "molecules" && <MoleculeTable uploadId={uploadId} molecules={molecules} onMoleculesChange={setMolecules} />}
+        {activeTab === "design" && <DesignPage uploadId={uploadId} />}
         {activeTab === "report" && <ReportPage uploadId={uploadId} />}
       </main>
     </div>

@@ -159,3 +159,36 @@ export interface CompoundDesignIdeas {
   ideas: DesignIdea[];
   context: Record<string, unknown>;
 }
+
+export interface DesignSpacePoint {
+  id: number;
+  name: string;
+  smiles: string;
+  source_molecule_id: number;
+  source_molecule_name: string | null;
+  x: number;
+  y: number;
+  cluster_id: number;
+  score: number;
+  properties: Record<string, number | string | null>;
+}
+
+export interface DesignSpaceCluster {
+  cluster_id: number;
+  size: number;
+  centroid_x: number;
+  centroid_y: number;
+  avg_score: number;
+  representative: DesignSpacePoint;
+}
+
+export interface DesignSpace {
+  upload_id: string;
+  requested_count: number;
+  generated_count: number;
+  projection_method: string;
+  cluster_count: number;
+  clusters: DesignSpaceCluster[];
+  points: DesignSpacePoint[];
+  metadata: Record<string, unknown>;
+}

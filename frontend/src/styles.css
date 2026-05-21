@@ -359,6 +359,236 @@ button:disabled {
   gap: 8px;
 }
 
+.design-space-controls {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+}
+
+.design-space-controls label {
+  display: grid;
+  gap: 6px;
+  color: #415767;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.design-space-controls input {
+  width: 132px;
+  min-height: 40px;
+  border: 1px solid #c9d7de;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #14232d;
+  font-weight: 700;
+}
+
+.design-space-layout {
+  display: grid;
+  grid-template-columns: minmax(540px, 1fr) minmax(320px, 390px);
+  gap: 18px;
+}
+
+.tsne-panel,
+.cluster-representatives,
+.design-space-empty {
+  background: #ffffff;
+  border: 1px solid #dce5ea;
+  border-radius: 8px;
+}
+
+.tsne-panel {
+  min-width: 0;
+  padding: 16px;
+}
+
+.tsne-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.tsne-header strong,
+.tsne-header span {
+  display: block;
+}
+
+.tsne-header strong {
+  color: #14232d;
+  font-size: 18px;
+}
+
+.tsne-header span {
+  margin-top: 4px;
+  color: #617482;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tsne-map {
+  width: 100%;
+  aspect-ratio: 1.47;
+  display: block;
+}
+
+.tsne-frame {
+  fill: #f8fafb;
+  stroke: #d7e2e8;
+  stroke-width: 2;
+}
+
+.tsne-point {
+  opacity: 0.38;
+  cursor: pointer;
+  transition:
+    opacity 0.16s ease,
+    r 0.16s ease;
+}
+
+.tsne-point.selected {
+  opacity: 0.86;
+}
+
+.cluster-representatives {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 16px;
+}
+
+.cluster-focus {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #edf2f5;
+}
+
+.cluster-focus img {
+  width: 150px;
+  height: 112px;
+  object-fit: contain;
+  border: 1px solid #edf2f5;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.cluster-focus h3 {
+  margin: 0;
+  color: #14232d;
+  font-size: 24px;
+}
+
+.cluster-focus span,
+.cluster-focus code {
+  display: block;
+}
+
+.cluster-focus span {
+  margin-top: 5px;
+  color: #405565;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cluster-focus code {
+  max-height: 54px;
+  margin-top: 8px;
+  overflow: auto;
+  color: #405565;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.cluster-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  max-height: 590px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.cluster-card {
+  position: relative;
+  min-height: 188px;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid #edf2f5;
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: #183343;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cluster-card.selected {
+  border-color: #23675e;
+  box-shadow: inset 0 0 0 2px rgba(35, 103, 94, 0.22);
+}
+
+.cluster-swatch {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+}
+
+.cluster-card img {
+  width: 100%;
+  height: 96px;
+  object-fit: contain;
+  border: 1px solid #edf2f5;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.cluster-card strong,
+.cluster-card small {
+  display: block;
+}
+
+.cluster-card strong {
+  color: #14232d;
+}
+
+.cluster-card small {
+  color: #617482;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.design-space-empty {
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  padding: 30px;
+  color: #405565;
+  text-align: center;
+}
+
+.design-space-empty strong,
+.design-space-empty span {
+  display: block;
+}
+
+.design-space-empty strong {
+  color: #14232d;
+  font-size: 18px;
+}
+
 .design-panel {
   margin-bottom: 18px;
   background: #ffffff;
@@ -1126,7 +1356,7 @@ td span {
   }
 
   .nav-list {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .nav-list button {
@@ -1152,6 +1382,28 @@ td span {
 
   .portfolio-grid {
     grid-template-columns: 1fr;
+  }
+
+  .design-space-controls {
+    margin-top: 14px;
+    align-items: stretch;
+  }
+
+  .design-space-controls input {
+    width: 100%;
+  }
+
+  .design-space-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .cluster-focus {
+    grid-template-columns: 112px minmax(0, 1fr);
+  }
+
+  .cluster-focus img {
+    width: 112px;
+    height: 88px;
   }
 
   .design-title {
