@@ -10,14 +10,69 @@ export interface MoleculeRecord {
   tpsa: number | null;
   rotatable_bonds: number | null;
   cluster_id: number | null;
+  properties: Record<string, number | string | null>;
+}
+
+export interface ProjectRecord {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+}
+
+export interface ProjectDetail extends ProjectRecord {
+  uploads: Record<string, unknown>[];
+  compound_count: number;
+}
+
+export interface DecisionLogRecord {
+  id: number;
+  project_id: string;
+  entry_type: string;
+  title: string;
+  body: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface DesignFeedbackRecord {
+  id: number;
+  project_id: string;
+  smiles: string;
+  feedback: "like" | "dislike" | string;
+  reason: string | null;
+  design: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface UploadResponse {
   upload_id: string;
+  project_id: string | null;
   filename: string;
   imported_count: number;
   skipped_count: number;
   molecules: MoleculeRecord[];
+}
+
+export interface AssayColumnInference {
+  name: string;
+  role: string;
+  assay_type: string;
+  unit: string | null;
+  direction: string | null;
+  confidence: number;
+  numeric_fraction: number;
+  median_value?: number | null;
+}
+
+export interface ColumnInference {
+  compound_count: number;
+  numeric_columns: string[];
+  potency_columns: AssayColumnInference[];
+  admet_columns: AssayColumnInference[];
+  recommended_potency_column: string | null;
+  recommended_admet_columns: string[];
+  metadata: Record<string, unknown>;
 }
 
 export interface ClusterSummary {
@@ -37,6 +92,13 @@ export interface ReportPlaceholder {
 export interface BriefingReport {
   title: string;
   markdown: string;
+}
+
+export interface DesignProposalReport {
+  title: string;
+  markdown: string;
+  recommendation_count: number;
+  decision_log_id: number | null;
 }
 
 export interface SarEvidenceRow {
@@ -84,6 +146,47 @@ export interface SarSummary {
   scaffold_groups: Record<string, number[]>;
   scaffold_map: SarScaffoldMap;
   admet_columns: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface SarRGroupTableRow {
+  compound_id: number;
+  name: string | null;
+  smiles: string;
+  potency: number;
+  r_groups: Record<string, string>;
+  admet_values: Record<string, number | string | null>;
+}
+
+export interface SarRGroupTable {
+  scaffold: string;
+  compound_count: number;
+  positions: string[];
+  rows: SarRGroupTableRow[];
+}
+
+export interface SarHeatmapCell {
+  scaffold: string;
+  position: string;
+  substitution: string;
+  compound_count: number;
+  median_potency: number;
+  best_potency: number;
+  admet_medians: Record<string, number | string | null>;
+}
+
+export interface SarHypothesis {
+  title: string;
+  statement: string;
+  confidence: string;
+  recommended_action: string;
+}
+
+export interface SarWorkbench {
+  summary: SarSummary;
+  rgroup_tables: SarRGroupTable[];
+  heatmap: SarHeatmapCell[];
+  hypotheses: SarHypothesis[];
   metadata: Record<string, unknown>;
 }
 
@@ -191,4 +294,47 @@ export interface DesignSpace {
   clusters: DesignSpaceCluster[];
   points: DesignSpacePoint[];
   metadata: Record<string, unknown>;
+}
+
+export interface SyntheticFeasibility {
+  score: number;
+  level: "easy" | "moderate" | "hard" | string;
+  reason: string;
+  features: Record<string, number | string | null>;
+}
+
+export interface NextRoundRecommendation {
+  smiles: string;
+  name: string;
+  score: number;
+  base_score: number | null;
+  preference_adjustment: number;
+  preference_reasons: string[];
+  priority: "high" | "medium" | "low" | string;
+  source_molecule_id: number;
+  source_molecule_name: string | null;
+  source_smiles: string;
+  transform_title: string | null;
+  property_goal: string | null;
+  rationale: string;
+  expected_benefit: string;
+  main_risk: string;
+  supporting_evidence: string[];
+  synthetic_note: string;
+  synthetic_feasibility: SyntheticFeasibility;
+  alerts: PropertyAlert[];
+  predicted_descriptors: Record<string, number | string | null>;
+  descriptor_deltas: Record<string, number | string | null>;
+}
+
+export interface NextRoundDesign {
+  potency_column: string | null;
+  potency_direction: string;
+  admet_columns: string[];
+  objectives: Record<string, unknown>;
+  constraints: Record<string, unknown>;
+  seed_compounds: Record<string, unknown>[];
+  recommendations: NextRoundRecommendation[];
+  metadata: Record<string, unknown>;
+  feedback: DesignFeedbackRecord[];
 }

@@ -1,10 +1,10 @@
 import { FileUp, Loader2 } from "lucide-react";
 import { useRef, useState } from "react";
-import { uploadCompoundFile } from "../api/client";
+import { createProject, uploadProjectCompoundFile } from "../api/client";
 import type { MoleculeRecord } from "../types/molecule";
 
 interface UploadPageProps {
-  onUploadComplete: (uploadId: string, molecules: MoleculeRecord[]) => void;
+  onUploadComplete: (uploadId: string, molecules: MoleculeRecord[], projectId?: string, projectName?: string) => void;
 }
 
 export function UploadPage({ onUploadComplete }: UploadPageProps) {
@@ -13,6 +13,7 @@ export function UploadPage({ onUploadComplete }: UploadPageProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState("Lead Optimization Project");
 
   async function handleUpload() {
     if (!file) return;
@@ -20,9 +21,10 @@ export function UploadPage({ onUploadComplete }: UploadPageProps) {
     setSummary(null);
     setIsUploading(true);
     try {
-      const response = await uploadCompoundFile(file);
+      const project = await createProject({ name: projectName.trim() || "Lead Optimization Project" });
+      const response = await uploadProjectCompoundFile(project.id, file);
       setSummary(`${response.imported_count} compounds imported, ${response.skipped_count} skipped`);
-      onUploadComplete(response.upload_id, response.molecules);
+      onUploadComplete(response.upload_id, response.molecules, project.id, project.name);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -35,6 +37,13 @@ export function UploadPage({ onUploadComplete }: UploadPageProps) {
       <div className="section-heading">
         <p className="eyebrow">Compound intake</p>
         <h2>Upload compound data</h2>
+      </div>
+
+      <div className="project-intake-row">
+        <label>
+          Project name
+          <input value={projectName} onChange={(event) => setProjectName(event.target.value)} />
+        </label>
       </div>
 
       <div

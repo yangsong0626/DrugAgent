@@ -1,29 +1,39 @@
 import { useEffect, useState } from "react";
 import {
+  createDecisionLog,
   exportBriefingReport,
+  exportDesignProposalReport,
   fetchPortfolioInsights,
+  fetchProjectTimeline,
   fetchReportPlaceholder,
   generateBriefingReport,
+  generateDesignProposalReport,
   structureUrl,
   summarizeSar,
 } from "../api/client";
-import type { BriefingReport, ReportPlaceholder, SarSummary } from "../types/molecule";
+import type { BriefingReport, DecisionLogRecord, DesignProposalReport, ReportPlaceholder, SarSummary } from "../types/molecule";
 
 interface ReportPageProps {
   uploadId?: string;
+  projectId?: string;
+  projectName?: string;
 }
 
-export function ReportPage({ uploadId }: ReportPageProps) {
+export function ReportPage({ uploadId, projectId, projectName: activeProjectName }: ReportPageProps) {
   const [report, setReport] = useState<ReportPlaceholder | null>(null);
   const [potencyColumn, setPotencyColumn] = useState("ic50_nm");
-  const [projectName, setProjectName] = useState("Patent-to-SAR Agent Briefing");
+  const [projectName, setProjectName] = useState(activeProjectName ?? "Patent-to-SAR Agent Briefing");
   const [admetColumns, setAdmetColumns] = useState("");
   const [minFoldChange, setMinFoldChange] = useState(3);
+  const [proposalCount, setProposalCount] = useState(24);
   const [sarSummary, setSarSummary] = useState<SarSummary | null>(null);
   const [briefing, setBriefing] = useState<BriefingReport | null>(null);
+  const [proposal, setProposal] = useState<DesignProposalReport | null>(null);
+  const [timeline, setTimeline] = useState<DecisionLogRecord[]>([]);
   const [sarError, setSarError] = useState<string | null>(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isProposalLoading, setIsProposalLoading] = useState(false);
 
   useEffect(() => {
     fetchReportPlaceholder().then(setReport).catch(() => {
@@ -35,6 +45,10 @@ export function ReportPage({ uploadId }: ReportPageProps) {
   }, []);
 
   useEffect(() => {
+    if (activeProjectName) setProjectName(activeProjectName);
+  }, [activeProjectName]);
+
+  useEffect(() => {
     if (!uploadId) return;
     fetchPortfolioInsights(uploadId)
       .then((insights) => {
@@ -43,6 +57,15 @@ export function ReportPage({ uploadId }: ReportPageProps) {
       })
       .catch(() => undefined);
   }, [uploadId]);
+
+  useEffect(() => {
+    refreshTimeline();
+  }, [projectId]);
+
+  async function refreshTimeline() {
+    if (!projectId) return;
+    fetchProjectTimeline(projectId).then(setTimeline).catch(() => undefined);
+  }
 
   async function handleSarSummary() {
     if (!uploadId) return;
@@ -90,6 +113,54 @@ export function ReportPage({ uploadId }: ReportPageProps) {
       setSarError(err instanceof Error ? err.message : "Could not export briefing");
     } finally {
       setIsExporting(false);
+    }
+  }
+
+  async function handleDesignProposalPreview() {
+    if (!uploadId && !projectId) return;
+    setIsProposalLoading(true);
+    setSarError(null);
+    try {
+      const response = await generateDesignProposalReport(proposalParams(uploadId, projectId, projectName, potencyColumn, admetColumns, minFoldChange, proposalCount));
+      setProposal(response);
+      refreshTimeline();
+    } catch (err) {
+      setSarError(err instanceof Error ? err.message : "Could not generate design proposal");
+    } finally {
+      setIsProposalLoading(false);
+    }
+  }
+
+  async function handleDesignProposalExport(format: "markdown" | "docx") {
+    if (!uploadId && !projectId) return;
+    setIsProposalLoading(true);
+    setSarError(null);
+    try {
+      await exportDesignProposalReport(proposalParams(uploadId, projectId, projectName, potencyColumn, admetColumns, minFoldChange, proposalCount), format);
+      refreshTimeline();
+    } catch (err) {
+      setSarError(err instanceof Error ? err.message : "Could not export design proposal");
+    } finally {
+      setIsProposalLoading(false);
+    }
+  }
+
+  async function handleManualDecision() {
+    if (!projectId) return;
+    setSarError(null);
+    try {
+      await createDecisionLog(projectId, {
+        entryType: "decision",
+        title: "Manual project checkpoint",
+        body: {
+          summary: "Reviewed current SAR, design recommendations, and report settings.",
+          potency_column: potencyColumn,
+          admet_columns: splitColumns(admetColumns),
+        },
+      });
+      refreshTimeline();
+    } catch (err) {
+      setSarError(err instanceof Error ? err.message : "Could not save decision checkpoint");
     }
   }
 
@@ -158,6 +229,46 @@ export function ReportPage({ uploadId }: ReportPageProps) {
           </div>
         )}
       </div>
+
+      <div className="sar-panel proposal-panel">
+        <div className="section-heading compact">
+          <p className="eyebrow">Design proposal</p>
+          <h2>Next-round report</h2>
+        </div>
+        <div className="sar-controls">
+          <label>
+            Proposal count
+            <input
+              type="number"
+              min="1"
+              max="80"
+              value={proposalCount}
+              onChange={(event) => setProposalCount(Number(event.target.value))}
+            />
+          </label>
+          <button className="primary-button" disabled={(!uploadId && !projectId) || isProposalLoading} onClick={handleDesignProposalPreview}>
+            Preview proposal
+          </button>
+          <button className="secondary-button" disabled={(!uploadId && !projectId) || isProposalLoading} onClick={() => handleDesignProposalExport("markdown")}>
+            Proposal MD
+          </button>
+          <button className="secondary-button" disabled={(!uploadId && !projectId) || isProposalLoading} onClick={() => handleDesignProposalExport("docx")}>
+            Proposal DOCX
+          </button>
+          <button className="secondary-button" disabled={!projectId} onClick={handleManualDecision}>
+            Save checkpoint
+          </button>
+        </div>
+        {proposal && (
+          <div className="briefing-preview">
+            <h3>{proposal.title}</h3>
+            <p>{proposal.recommendation_count} recommendations generated. Decision log: {proposal.decision_log_id ?? "not saved"}</p>
+            <pre>{proposal.markdown}</pre>
+          </div>
+        )}
+      </div>
+
+      <TimelinePanel timeline={timeline} projectId={projectId} />
     </section>
   );
 }
@@ -173,6 +284,56 @@ function reportParams(uploadId: string, projectName: string, potencyColumn: stri
       .filter(Boolean),
     minFoldChange,
   };
+}
+
+function proposalParams(
+  uploadId: string | undefined,
+  projectId: string | undefined,
+  projectName: string,
+  potencyColumn: string,
+  admetColumns: string,
+  minFoldChange: number,
+  count: number,
+) {
+  return {
+    uploadId,
+    projectId,
+    projectName,
+    potencyColumn: potencyColumn.trim() || undefined,
+    admetColumns: splitColumns(admetColumns),
+    minFoldChange,
+    count: Math.max(1, Math.min(80, Math.round(count || 24))),
+  };
+}
+
+function splitColumns(value: string) {
+  return value
+    .split(",")
+    .map((column) => column.trim())
+    .filter(Boolean);
+}
+
+function TimelinePanel({ timeline, projectId }: { timeline: DecisionLogRecord[]; projectId?: string }) {
+  return (
+    <div className="timeline-panel">
+      <div className="section-heading compact">
+        <p className="eyebrow">Project memory</p>
+        <h2>Decision timeline</h2>
+      </div>
+      {!projectId && <p className="status error">Create or upload into a project to persist decisions.</p>}
+      {projectId && timeline.length === 0 && <p className="status success">No project decisions recorded yet.</p>}
+      <div className="timeline-list">
+        {timeline.map((item) => (
+          <article key={item.id}>
+            <span>{item.entry_type}</span>
+            <strong>{item.title}</strong>
+            <time>{item.created_at}</time>
+            <p>{typeof item.body.summary === "string" ? item.body.summary : "Decision details saved."}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function SarSummaryView({ summary }: { summary: SarSummary }) {

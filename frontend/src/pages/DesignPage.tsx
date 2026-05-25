@@ -1,10 +1,11 @@
-import { Loader2, Network, Sparkles } from "lucide-react";
-import { useMemo, useState } from "react";
-import { analogStructureUrl, generateDesignSpace } from "../api/client";
-import type { DesignSpace, DesignSpaceCluster, DesignSpacePoint } from "../types/molecule";
+import { AlertTriangle, CheckCircle2, Loader2, Network, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { analogStructureUrl, generateDesignSpace, generateNextRoundDesign, inferAssayColumns, submitDesignFeedback } from "../api/client";
+import type { DesignFeedbackRecord, DesignSpace, DesignSpaceCluster, DesignSpacePoint, NextRoundDesign, NextRoundRecommendation } from "../types/molecule";
 
 interface DesignPageProps {
   uploadId?: string;
+  projectId?: string;
 }
 
 const CLUSTER_COLORS = [
@@ -20,12 +21,84 @@ const CLUSTER_COLORS = [
   "#4f6272",
 ];
 
-export function DesignPage({ uploadId }: DesignPageProps) {
+export function DesignPage({ uploadId, projectId }: DesignPageProps) {
   const [designSpace, setDesignSpace] = useState<DesignSpace | null>(null);
+  const [nextRound, setNextRound] = useState<NextRoundDesign | null>(null);
   const [targetCount, setTargetCount] = useState(12000);
+  const [recommendationCount, setRecommendationCount] = useState(24);
+  const [potencyColumn, setPotencyColumn] = useState("");
+  const [admetColumns, setAdmetColumns] = useState("");
   const [selectedCluster, setSelectedCluster] = useState<number | null>(null);
   const [isDesigning, setIsDesigning] = useState(false);
+  const [isRecommending, setIsRecommending] = useState(false);
+  const [feedbackBySmiles, setFeedbackBySmiles] = useState<Record<string, DesignFeedbackRecord>>({});
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const scope = projectId ? { projectId } : uploadId ? { uploadId } : null;
+    if (!scope) return;
+    inferAssayColumns(scope)
+      .then((columns) => {
+        setPotencyColumn(columns.recommended_potency_column ?? "");
+        setAdmetColumns(columns.recommended_admet_columns.join(", "));
+      })
+      .catch(() => undefined);
+  }, [projectId, uploadId]);
+
+  async function handleNextRound() {
+    const scope = projectId ? { projectId } : uploadId ? { uploadId } : null;
+    if (!scope) {
+      setError("Upload compounds before generating next-round designs.");
+      return;
+    }
+    setIsRecommending(true);
+    setError(null);
+    try {
+      const response = await generateNextRoundDesign({
+          ...scope,
+          potencyColumn: potencyColumn.trim() || undefined,
+          admetColumns: splitColumns(admetColumns),
+          count: Math.max(1, Math.min(80, Math.round(recommendationCount || 24))),
+          objectives: {
+            improve_potency: true,
+            reduce_logp: true,
+            improve_solubility: true,
+            improve_microsomal_stability: splitColumns(admetColumns).some((column) => /clint|clearance|hlm|mlm/i.test(column)),
+          },
+          constraints: {
+            max_mw: 560,
+            max_logp: 5.5,
+            max_tpsa: 150,
+            prefer_one_step_from_existing: true,
+          },
+        });
+      setNextRound(response);
+      setFeedbackBySmiles(Object.fromEntries((response.feedback ?? []).map((item) => [item.smiles, item])));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not generate next-round designs.");
+    } finally {
+      setIsRecommending(false);
+    }
+  }
+
+  async function handleFeedback(recommendation: NextRoundRecommendation, feedback: "like" | "dislike") {
+    if (!projectId) {
+      setError("Design feedback is saved at the project level. Upload into a project before giving feedback.");
+      return;
+    }
+    setError(null);
+    try {
+      const record = await submitDesignFeedback(projectId, {
+        smiles: recommendation.smiles,
+        feedback,
+        design: recommendation as unknown as Record<string, unknown>,
+      });
+      setFeedbackBySmiles((current) => ({ ...current, [record.smiles]: record }));
+      await handleNextRound();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save design feedback.");
+    }
+  }
 
   async function handleDesignSpace() {
     if (!uploadId) {
@@ -57,7 +130,50 @@ export function DesignPage({ uploadId }: DesignPageProps) {
       <div className="section-heading with-actions">
         <div>
           <p className="eyebrow">Design</p>
-          <h2>Compound design space</h2>
+          <h2>Next-round compound design</h2>
+        </div>
+        <div className="design-space-controls">
+          <label>
+            Recommendations
+            <input
+              min={1}
+              max={80}
+              step={1}
+              type="number"
+              value={recommendationCount}
+              onChange={(event) => setRecommendationCount(Number(event.target.value))}
+            />
+          </label>
+          <button className="primary-button" disabled={(!uploadId && !projectId) || isRecommending} onClick={handleNextRound}>
+            {isRecommending ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}
+            Recommend next round
+          </button>
+        </div>
+      </div>
+
+      <div className="next-round-controls">
+        <label>
+          Potency column
+          <input value={potencyColumn} onChange={(event) => setPotencyColumn(event.target.value)} placeholder="ic50_nm" />
+        </label>
+        <label>
+          ADMET columns
+          <input value={admetColumns} onChange={(event) => setAdmetColumns(event.target.value)} placeholder="clint, solubility" />
+        </label>
+      </div>
+
+      {!uploadId && !projectId && <p className="status error">Upload CSV, SDF, or patent PDF compounds before designing.</p>}
+      {error && <p className="status error">{error}</p>}
+      {nextRound ? (
+        <NextRoundPanel design={nextRound} feedbackBySmiles={feedbackBySmiles} onFeedback={handleFeedback} />
+      ) : (
+        <NextRoundEmpty />
+      )}
+
+      <div className="section-heading with-actions design-space-heading">
+        <div>
+          <p className="eyebrow">Design map</p>
+          <h2>Enumerated design space</h2>
         </div>
         <div className="design-space-controls">
           <label>
@@ -77,9 +193,6 @@ export function DesignPage({ uploadId }: DesignPageProps) {
           </button>
         </div>
       </div>
-
-      {!uploadId && <p className="status error">Upload CSV, SDF, or patent PDF compounds before opening design space.</p>}
-      {error && <p className="status error">{error}</p>}
 
       {designSpace ? (
         <div className="design-space-layout">
@@ -118,6 +231,109 @@ export function DesignPage({ uploadId }: DesignPageProps) {
         </div>
       )}
     </section>
+  );
+}
+
+function NextRoundEmpty() {
+  return (
+    <div className="next-round-empty">
+      <Sparkles size={24} />
+      <strong>Generate a prioritized make/test list from the uploaded SAR.</strong>
+      <span>Recommendations include descriptor movement, medchem alerts, and synthesis feasibility.</span>
+    </div>
+  );
+}
+
+function NextRoundPanel({
+  design,
+  feedbackBySmiles,
+  onFeedback,
+}: {
+  design: NextRoundDesign;
+  feedbackBySmiles: Record<string, DesignFeedbackRecord>;
+  onFeedback: (recommendation: NextRoundRecommendation, feedback: "like" | "dislike") => void;
+}) {
+  return (
+    <div className="next-round-panel">
+      <div className="next-round-header">
+        <div>
+          <strong>{design.recommendations.length} recommended analogs</strong>
+          <span>
+            {design.potency_column ?? "No potency endpoint"} · {String(design.metadata.generated_candidate_count ?? 0)} candidates scored ·{" "}
+            {String(design.metadata.preference_feedback_count ?? 0)} feedback signals
+          </span>
+        </div>
+      </div>
+      <div className="recommendation-grid">
+        {design.recommendations.slice(0, 12).map((recommendation) => (
+          <RecommendationCard
+            feedback={feedbackBySmiles[recommendation.smiles]?.feedback}
+            onFeedback={onFeedback}
+            recommendation={recommendation}
+            key={recommendation.smiles}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RecommendationCard({
+  recommendation,
+  feedback,
+  onFeedback,
+}: {
+  recommendation: NextRoundRecommendation;
+  feedback?: string;
+  onFeedback: (recommendation: NextRoundRecommendation, feedback: "like" | "dislike") => void;
+}) {
+  const alert = recommendation.alerts[0];
+  const feasibility = recommendation.synthetic_feasibility;
+  return (
+    <article className={`recommendation-card priority-${recommendation.priority}`}>
+      <div className="recommendation-topline">
+        <span>{recommendation.priority}</span>
+        <strong>{recommendation.score.toFixed(1)}</strong>
+      </div>
+      {recommendation.preference_adjustment !== 0 && (
+        <div className={recommendation.preference_adjustment > 0 ? "preference-chip positive" : "preference-chip negative"}>
+          {recommendation.preference_adjustment > 0 ? "+" : ""}
+          {recommendation.preference_adjustment.toFixed(1)} preference
+        </div>
+      )}
+      <img src={analogStructureUrl(recommendation.smiles)} alt={recommendation.name} />
+      <h3>{recommendation.transform_title ?? recommendation.name}</h3>
+      <p>{recommendation.expected_benefit}</p>
+      <div className="feasibility-line">
+        {feasibility.level === "easy" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+        <span>
+          {feasibility.level} synthesis · {Math.round(feasibility.score * 100)}%
+        </span>
+      </div>
+      <small>{alert ? alert.message : recommendation.main_risk}</small>
+      <div className="feedback-row" aria-label="Design feedback">
+        <button className={feedback === "like" ? "active" : ""} onClick={() => onFeedback(recommendation, "like")} title="Like this design">
+          <ThumbsUp size={15} />
+          Like
+        </button>
+        <button className={feedback === "dislike" ? "active dislike" : "dislike"} onClick={() => onFeedback(recommendation, "dislike")} title="Dislike this design">
+          <ThumbsDown size={15} />
+          Dislike
+        </button>
+      </div>
+      <details>
+        <summary>Rationale</summary>
+        <p>{recommendation.rationale}</p>
+        {recommendation.preference_reasons.length > 0 && (
+          <ul className="preference-reasons">
+            {recommendation.preference_reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        )}
+        <code>{recommendation.smiles}</code>
+      </details>
+    </article>
   );
 }
 
@@ -213,4 +429,11 @@ function normalizePoints(points: DesignSpacePoint[]) {
 
 function clusterColor(clusterId: number) {
   return CLUSTER_COLORS[(clusterId - 1) % CLUSTER_COLORS.length];
+}
+
+function splitColumns(value: string) {
+  return value
+    .split(",")
+    .map((column) => column.trim())
+    .filter(Boolean);
 }

@@ -1,12 +1,19 @@
 import type {
   BriefingReport,
   ClusterSummary,
+  ColumnInference,
   CompoundDesignIdeas,
+  DecisionLogRecord,
+  DesignFeedbackRecord,
+  DesignProposalReport,
   DesignSpace,
   MoleculeRecord,
+  NextRoundDesign,
   PortfolioInsights,
+  ProjectRecord,
   ReportPlaceholder,
   SarSummary,
+  SarWorkbench,
   UploadResponse,
 } from "../types/molecule";
 
@@ -83,10 +90,89 @@ export async function uploadCompoundFile(file: File): Promise<UploadResponse> {
   return parseJson<UploadResponse>(response);
 }
 
+export async function createProject(params: { name: string; description?: string }): Promise<ProjectRecord> {
+  const response = await fetchApi("/api/projects", () => ({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  }));
+  return parseJson<ProjectRecord>(response);
+}
+
+export async function uploadProjectCompoundFile(projectId: string, file: File): Promise<UploadResponse> {
+  const response = await fetchApi(`/api/projects/${encodeURIComponent(projectId)}/uploads`, () => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return {
+      method: "POST",
+      body: formData,
+    };
+  });
+  return parseJson<UploadResponse>(response);
+}
+
 export async function fetchMolecules(uploadId?: string): Promise<MoleculeRecord[]> {
   const query = uploadId ? `?upload_id=${encodeURIComponent(uploadId)}` : "";
   const response = await fetchApi(`/api/molecules${query}`);
   return parseJson<MoleculeRecord[]>(response);
+}
+
+export async function fetchProjectMolecules(projectId: string): Promise<MoleculeRecord[]> {
+  const response = await fetchApi(`/api/projects/${encodeURIComponent(projectId)}/molecules`);
+  return parseJson<MoleculeRecord[]>(response);
+}
+
+export async function fetchProjectTimeline(projectId: string): Promise<DecisionLogRecord[]> {
+  const response = await fetchApi(`/api/projects/${encodeURIComponent(projectId)}/timeline`);
+  return parseJson<DecisionLogRecord[]>(response);
+}
+
+export async function createDecisionLog(
+  projectId: string,
+  params: { entryType?: string; title: string; body?: Record<string, unknown> },
+): Promise<DecisionLogRecord> {
+  const response = await fetchApi(`/api/projects/${encodeURIComponent(projectId)}/decision-log`, () => ({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      entry_type: params.entryType ?? "decision",
+      title: params.title,
+      body: params.body ?? {},
+    }),
+  }));
+  return parseJson<DecisionLogRecord>(response);
+}
+
+export async function fetchDesignFeedback(projectId: string): Promise<DesignFeedbackRecord[]> {
+  const response = await fetchApi(`/api/projects/${encodeURIComponent(projectId)}/design-feedback`);
+  return parseJson<DesignFeedbackRecord[]>(response);
+}
+
+export async function submitDesignFeedback(
+  projectId: string,
+  params: {
+    smiles: string;
+    feedback: "like" | "dislike";
+    reason?: string;
+    design: Record<string, unknown>;
+  },
+): Promise<DesignFeedbackRecord> {
+  const response = await fetchApi(`/api/projects/${encodeURIComponent(projectId)}/design-feedback`, () => ({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  }));
+  return parseJson<DesignFeedbackRecord>(response);
+}
+
+export async function inferAssayColumns(params: { uploadId?: string; projectId?: string }): Promise<ColumnInference> {
+  const query = params.projectId
+    ? `?project_id=${encodeURIComponent(params.projectId)}`
+    : params.uploadId
+      ? `?upload_id=${encodeURIComponent(params.uploadId)}`
+      : "";
+  const response = await fetchApi(`/api/assays/columns${query}`);
+  return parseJson<ColumnInference>(response);
 }
 
 export async function calculateClusters(uploadId?: string): Promise<ClusterSummary[]> {
@@ -127,6 +213,31 @@ export async function generateDesignSpace(params: {
   return parseJson<DesignSpace>(response);
 }
 
+export async function generateNextRoundDesign(params: {
+  uploadId?: string;
+  projectId?: string;
+  potencyColumn?: string;
+  admetColumns?: string[];
+  count?: number;
+  objectives?: Record<string, unknown>;
+  constraints?: Record<string, unknown>;
+}): Promise<NextRoundDesign> {
+  const response = await fetchApi("/api/design/next-round", () => ({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      project_id: params.projectId,
+      upload_id: params.uploadId,
+      potency_column: params.potencyColumn || null,
+      admet_columns: params.admetColumns ?? [],
+      count: params.count ?? 24,
+      objectives: params.objectives ?? {},
+      constraints: params.constraints ?? {},
+    }),
+  }));
+  return parseJson<NextRoundDesign>(response);
+}
+
 export async function fetchReportPlaceholder(): Promise<ReportPlaceholder> {
   const response = await fetchApi("/api/reports/placeholder");
   return parseJson<ReportPlaceholder>(response);
@@ -149,6 +260,29 @@ export async function summarizeSar(params: {
     }),
   }));
   return parseJson<SarSummary>(response);
+}
+
+export async function generateSarWorkbench(params: {
+  uploadId?: string;
+  projectId?: string;
+  potencyColumn: string;
+  potencyDirection?: string;
+  admetColumns: string[];
+  minFoldChange: number;
+}): Promise<SarWorkbench> {
+  const response = await fetchApi("/api/sar/workbench", () => ({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      project_id: params.projectId,
+      upload_id: params.uploadId,
+      potency_column: params.potencyColumn,
+      potency_direction: params.potencyDirection ?? "lower_is_better",
+      admet_columns: params.admetColumns,
+      min_fold_change: params.minFoldChange,
+    }),
+  }));
+  return parseJson<SarWorkbench>(response);
 }
 
 export async function generateBriefingReport(params: {
@@ -196,6 +330,55 @@ export async function exportBriefingReport(
   URL.revokeObjectURL(url);
 }
 
+export async function generateDesignProposalReport(params: {
+  uploadId?: string;
+  projectId?: string;
+  projectName: string;
+  potencyColumn?: string;
+  admetColumns: string[];
+  minFoldChange: number;
+  count: number;
+}): Promise<DesignProposalReport> {
+  const response = await fetchApi("/api/reports/design-proposal", () => ({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(designProposalPayload(params)),
+  }));
+  return parseJson<DesignProposalReport>(response);
+}
+
+export async function exportDesignProposalReport(
+  params: {
+    uploadId?: string;
+    projectId?: string;
+    projectName: string;
+    potencyColumn?: string;
+    admetColumns: string[];
+    minFoldChange: number;
+    count: number;
+  },
+  format: "markdown" | "docx",
+): Promise<void> {
+  const response = await fetchApi(`/api/reports/design-proposal/export?format=${format}`, () => ({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(designProposalPayload(params)),
+  }));
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(formatApiError(payload.detail) ?? "Design proposal export failed");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = format === "docx" ? "medchem_design_proposal.docx" : "medchem_design_proposal.md";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 function reportPayload(params: {
   uploadId: string;
   projectName: string;
@@ -209,6 +392,38 @@ function reportPayload(params: {
     potency_column: params.potencyColumn || null,
     admet_columns: params.admetColumns,
     min_fold_change: params.minFoldChange,
+  };
+}
+
+function designProposalPayload(params: {
+  uploadId?: string;
+  projectId?: string;
+  projectName: string;
+  potencyColumn?: string;
+  admetColumns: string[];
+  minFoldChange: number;
+  count: number;
+}) {
+  return {
+    project_id: params.projectId ?? null,
+    upload_id: params.projectId ? null : params.uploadId,
+    project_name: params.projectName,
+    potency_column: params.potencyColumn || null,
+    admet_columns: params.admetColumns,
+    min_fold_change: params.minFoldChange,
+    count: params.count,
+    objectives: {
+      improve_potency: true,
+      reduce_logp: true,
+      improve_solubility: true,
+      improve_microsomal_stability: params.admetColumns.some((column) => /clint|clearance|hlm|mlm/i.test(column)),
+    },
+    constraints: {
+      max_mw: 560,
+      max_logp: 5.5,
+      max_tpsa: 150,
+      prefer_one_step_from_existing: true,
+    },
   };
 }
 

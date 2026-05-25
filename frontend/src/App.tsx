@@ -1,22 +1,26 @@
-import { FlaskConical, FileText, Network, UploadCloud } from "lucide-react";
+import { FlaskConical, FileText, Network, Table2, UploadCloud } from "lucide-react";
 import { useMemo, useState } from "react";
 import { MoleculeTable } from "./components/MoleculeTable";
 import { DesignPage } from "./pages/DesignPage";
 import { ReportPage } from "./pages/ReportPage";
+import { SarPage } from "./pages/SarPage";
 import { UploadPage } from "./pages/UploadPage";
 import type { MoleculeRecord } from "./types/molecule";
 
-type Tab = "upload" | "molecules" | "design" | "report";
+type Tab = "upload" | "molecules" | "sar" | "design" | "report";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("upload");
   const [uploadId, setUploadId] = useState<string | undefined>();
+  const [projectId, setProjectId] = useState<string | undefined>();
+  const [projectName, setProjectName] = useState<string | undefined>();
   const [molecules, setMolecules] = useState<MoleculeRecord[]>([]);
 
   const selectedUploadLabel = useMemo(() => {
+    if (projectName) return `${projectName} · ${molecules.length} compounds`;
     if (!uploadId) return "No upload selected";
     return `${molecules.length} compounds loaded`;
-  }, [molecules.length, uploadId]);
+  }, [molecules.length, projectName, uploadId]);
 
   return (
     <div className="app-shell">
@@ -37,6 +41,10 @@ export default function App() {
             <FlaskConical size={18} />
             Molecules
           </button>
+          <button className={activeTab === "sar" ? "active" : ""} onClick={() => setActiveTab("sar")}>
+            <Table2 size={18} />
+            SAR
+          </button>
           <button className={activeTab === "design" ? "active" : ""} onClick={() => setActiveTab("design")}>
             <Network size={18} />
             Design
@@ -51,16 +59,19 @@ export default function App() {
       <main className="workspace">
         {activeTab === "upload" && (
           <UploadPage
-            onUploadComplete={(nextUploadId, nextMolecules) => {
+            onUploadComplete={(nextUploadId, nextMolecules, nextProjectId, nextProjectName) => {
               setUploadId(nextUploadId);
+              setProjectId(nextProjectId);
+              setProjectName(nextProjectName);
               setMolecules(nextMolecules);
-              setActiveTab("molecules");
+              setActiveTab("sar");
             }}
           />
         )}
         {activeTab === "molecules" && <MoleculeTable uploadId={uploadId} molecules={molecules} onMoleculesChange={setMolecules} />}
-        {activeTab === "design" && <DesignPage uploadId={uploadId} />}
-        {activeTab === "report" && <ReportPage uploadId={uploadId} />}
+        {activeTab === "sar" && <SarPage uploadId={uploadId} projectId={projectId} />}
+        {activeTab === "design" && <DesignPage uploadId={uploadId} projectId={projectId} />}
+        {activeTab === "report" && <ReportPage uploadId={uploadId} projectId={projectId} projectName={projectName} />}
       </main>
     </div>
   );

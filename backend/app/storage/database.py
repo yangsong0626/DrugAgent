@@ -25,6 +25,40 @@ MOLECULE_COLUMNS = (
     "cluster_id",
 )
 
+UPLOAD_COLUMNS = (
+    "id",
+    "project_id",
+    "filename",
+    "created_at",
+)
+
+PROJECT_COLUMNS = (
+    "id",
+    "name",
+    "description",
+    "created_at",
+)
+
+DECISION_LOG_COLUMNS = (
+    "id",
+    "project_id",
+    "entry_type",
+    "title",
+    "body_json",
+    "created_at",
+)
+
+DESIGN_FEEDBACK_COLUMNS = (
+    "id",
+    "project_id",
+    "smiles",
+    "feedback",
+    "reason",
+    "design_json",
+    "created_at",
+    "updated_at",
+)
+
 
 def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     ensure_runtime_dirs()
@@ -37,13 +71,28 @@ def init_db() -> None:
     with get_connection() as conn:
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS uploads (
+            CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY,
-                filename TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS uploads (
+                id TEXT PRIMARY KEY,
+                project_id TEXT,
+                filename TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(project_id) REFERENCES projects(id)
+            )
+            """
+        )
+        upload_columns = {row["name"] for row in conn.execute("PRAGMA table_info(uploads)").fetchall()}
+        if "project_id" not in upload_columns:
+            conn.execute("ALTER TABLE uploads ADD COLUMN project_id TEXT REFERENCES projects(id)")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS molecules (
@@ -65,14 +114,87 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS decision_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL,
+                entry_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(project_id) REFERENCES projects(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS design_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL,
+                smiles TEXT NOT NULL,
+                feedback TEXT NOT NULL,
+                reason TEXT,
+                design_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_id, smiles),
+                FOREIGN KEY(project_id) REFERENCES projects(id)
+            )
+            """
+        )
 
 
-def create_upload(upload_id: str, filename: str) -> None:
+def create_project(project_id: str, name: str, description: str | None = None) -> None:
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO uploads (id, filename) VALUES (?, ?)",
-            (upload_id, filename),
+            "INSERT INTO projects (id, name, description) VALUES (?, ?, ?)",
+            (project_id, name, description),
         )
+
+
+def get_project(project_id: str) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            f"SELECT {', '.join(PROJECT_COLUMNS)} FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_projects() -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(f"SELECT {', '.join(PROJECT_COLUMNS)} FROM projects ORDER BY created_at DESC").fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_upload(upload_id: str, filename: str, project_id: str | None = None) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO uploads (id, project_id, filename) VALUES (?, ?, ?)",
+            (upload_id, project_id, filename),
+        )
+
+
+def get_upload(upload_id: str) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            f"SELECT {', '.join(UPLOAD_COLUMNS)} FROM uploads WHERE id = ?",
+            (upload_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_uploads(project_id: str | None = None) -> list[dict[str, Any]]:
+    query = f"SELECT {', '.join(UPLOAD_COLUMNS)} FROM uploads"
+    params: tuple[Any, ...] = ()
+    if project_id:
+        query += " WHERE project_id = ?"
+        params = (project_id,)
+    query += " ORDER BY created_at DESC"
+
+    with get_connection() as conn:
+        return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
 def insert_molecules(records: Iterable[dict[str, Any]]) -> list[int]:
@@ -122,6 +244,108 @@ def list_molecules(upload_id: str | None = None) -> list[dict[str, Any]]:
 
     with get_connection() as conn:
         return [_row_to_dict(row) for row in conn.execute(query, params).fetchall()]
+
+
+def list_molecules_for_project(project_id: str) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT {', '.join(f'm.{column}' for column in MOLECULE_COLUMNS)}
+            FROM molecules m
+            JOIN uploads u ON u.id = m.upload_id
+            WHERE u.project_id = ?
+            ORDER BY m.id DESC
+            """,
+            (project_id,),
+        ).fetchall()
+    return [_row_to_dict(row) for row in rows]
+
+
+def create_decision_log(project_id: str, entry_type: str, title: str, body: dict[str, Any]) -> dict[str, Any]:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO decision_logs (project_id, entry_type, title, body_json)
+            VALUES (?, ?, ?, ?)
+            """,
+            (project_id, entry_type, title, json.dumps(body)),
+        )
+        row = conn.execute(
+            f"SELECT {', '.join(DECISION_LOG_COLUMNS)} FROM decision_logs WHERE id = ?",
+            (int(cursor.lastrowid),),
+        ).fetchone()
+    return _decision_row_to_dict(row)
+
+
+def list_decision_logs(project_id: str) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT {', '.join(DECISION_LOG_COLUMNS)}
+            FROM decision_logs
+            WHERE project_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (project_id,),
+        ).fetchall()
+    return [_decision_row_to_dict(row) for row in rows]
+
+
+def upsert_design_feedback(
+    project_id: str,
+    smiles: str,
+    feedback: str,
+    design: dict[str, Any],
+    reason: str | None = None,
+) -> dict[str, Any]:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO design_feedback (project_id, smiles, feedback, reason, design_json)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(project_id, smiles) DO UPDATE SET
+                feedback = excluded.feedback,
+                reason = excluded.reason,
+                design_json = excluded.design_json,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (project_id, smiles, feedback, reason, json.dumps(design)),
+        )
+        row = conn.execute(
+            f"""
+            SELECT {', '.join(DESIGN_FEEDBACK_COLUMNS)}
+            FROM design_feedback
+            WHERE project_id = ? AND smiles = ?
+            """,
+            (project_id, smiles),
+        ).fetchone()
+    return _feedback_row_to_dict(row)
+
+
+def list_design_feedback(project_id: str) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT {', '.join(DESIGN_FEEDBACK_COLUMNS)}
+            FROM design_feedback
+            WHERE project_id = ?
+            ORDER BY updated_at DESC, id DESC
+            """,
+            (project_id,),
+        ).fetchall()
+    return [_feedback_row_to_dict(row) for row in rows]
+
+
+def _feedback_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    data = {key: row[key] for key in row.keys()}
+    data["design"] = json.loads(data.pop("design_json") or "{}")
+    return data
+
+
+def _decision_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    data = {key: row[key] for key in row.keys()}
+    data["body"] = json.loads(data.pop("body_json") or "{}")
+    return data
 
 
 def get_molecule(molecule_id: int) -> dict[str, Any] | None:
