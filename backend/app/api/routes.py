@@ -14,6 +14,10 @@ from app.models.schemas import (
     ClusterSummary,
     BriefingReportRequest,
     BriefingReportResponse,
+    CommercialAnalogSearchRequest,
+    CommercialAnalogSearchResponse,
+    CommercialCatalogRecord,
+    CommercialCatalogUploadResponse,
     ColumnInferenceResponse,
     DecisionLogCreateRequest,
     DecisionLogRecord,
@@ -39,6 +43,7 @@ from app.models.schemas import (
     UploadResponse,
 )
 from app.services.clustering import cluster_molecules
+from app.services.commercial_analogs import find_similar_commercial_analogs, parse_commercial_catalog
 from app.services.column_inference import infer_assay_columns
 from app.services.design_ideas import generate_design_ideas
 from app.services.design_proposal_report import (
@@ -56,8 +61,10 @@ from app.services.sar_summary import generate_sar_summary
 from app.services.sar_workbench import build_sar_workbench
 from app.storage.database import (
     create_project,
+    create_commercial_catalog,
     create_decision_log,
     create_upload,
+    get_commercial_catalog,
     get_molecule,
     get_molecules_by_ids,
     get_project,
@@ -66,6 +73,8 @@ from app.storage.database import (
     list_molecules_for_project,
     list_decision_logs,
     list_design_feedback,
+    list_commercial_catalogs,
+    list_commercial_compounds,
     list_projects,
     list_uploads,
     upsert_design_feedback,
@@ -77,6 +86,60 @@ router = APIRouter(prefix="/api")
 @router.post("/uploads/csv-sdf", response_model=UploadResponse)
 async def upload_csv_sdf(file: UploadFile = File(...), project_id: str | None = Form(default=None)) -> UploadResponse:
     return await _ingest_upload(file=file, project_id=project_id)
+
+
+@router.post("/commercial/catalogs", response_model=CommercialCatalogUploadResponse)
+async def upload_commercial_catalog(file: UploadFile = File(...), source_type: str = Form(default="enamine_real")) -> CommercialCatalogUploadResponse:
+    original_path = Path(file.filename or "")
+    suffixes = [suffix.lower() for suffix in original_path.suffixes]
+    suffix = suffixes[-1] if suffixes else ""
+    inner_suffix = suffixes[-2] if suffix == ".gz" and len(suffixes) > 1 else suffix
+    if suffix not in {".csv", ".sdf", ".cxsmiles", ".smi", ".smiles", ".txt", ".gz", ".bz2"} or (
+        suffix in {".gz", ".bz2"} and inner_suffix not in {".cxsmiles", ".smi", ".smiles", ".txt"}
+    ):
+        raise HTTPException(status_code=400, detail="Upload Enamine REAL as CSV, SDF, SMILES, CXSMILES, TXT, or compressed SMILES/CXSMILES.")
+
+    catalog_id = str(uuid4())
+    safe_name = Path(file.filename or f"commercial_catalog{suffix}").name
+    suffix_chain = "".join(original_path.suffixes) if original_path.suffixes else suffix
+    stored_path = UPLOAD_DIR / f"{catalog_id}.commercial{suffix_chain}"
+    stored_path.write_bytes(await file.read())
+    try:
+        records, skipped_count = parse_commercial_catalog(stored_path, safe_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not records:
+        raise HTTPException(status_code=400, detail="No valid commercial compounds were found in this catalog.")
+    catalog = create_commercial_catalog(catalog_id, safe_name, records, source_type=source_type.strip() or "enamine_real")
+    return CommercialCatalogUploadResponse(
+        catalog=CommercialCatalogRecord(**catalog),
+        imported_count=len(records),
+        skipped_count=skipped_count,
+    )
+
+
+@router.get("/commercial/catalogs", response_model=List[CommercialCatalogRecord])
+def get_commercial_catalogs() -> List[CommercialCatalogRecord]:
+    return [CommercialCatalogRecord(**catalog) for catalog in list_commercial_catalogs()]
+
+
+@router.post("/commercial/analogs/search", response_model=CommercialAnalogSearchResponse)
+def search_commercial_analogs(request: CommercialAnalogSearchRequest) -> CommercialAnalogSearchResponse:
+    if request.catalog_id and get_commercial_catalog(request.catalog_id) is None:
+        raise HTTPException(status_code=404, detail="Commercial catalog not found.")
+    compounds = list_commercial_compounds(request.catalog_id)
+    if not compounds:
+        raise HTTPException(status_code=400, detail="Upload an Enamine REAL SMILES/CXSMILES catalog before searching for high-similarity commercial analogs.")
+    try:
+        result = find_similar_commercial_analogs(
+            target_smiles=request.target_smiles,
+            compounds=compounds,
+            min_similarity=request.min_similarity,
+            limit=request.limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CommercialAnalogSearchResponse(**result)
 
 
 @router.post("/projects", response_model=ProjectRecord)

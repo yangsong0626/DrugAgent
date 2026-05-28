@@ -1,16 +1,17 @@
-import { FlaskConical, FileText, Network, Table2, UploadCloud } from "lucide-react";
+import { FlaskConical, FileText, LayoutDashboard, Network, Table2, UploadCloud } from "lucide-react";
 import { useMemo, useState } from "react";
 import { MoleculeTable } from "./components/MoleculeTable";
+import { DashboardPage } from "./pages/DashboardPage";
 import { DesignPage } from "./pages/DesignPage";
 import { ReportPage } from "./pages/ReportPage";
 import { SarPage } from "./pages/SarPage";
 import { UploadPage } from "./pages/UploadPage";
 import type { MoleculeRecord } from "./types/molecule";
 
-type Tab = "upload" | "molecules" | "sar" | "design" | "report";
+type Tab = "dashboard" | "upload" | "molecules" | "sar" | "design" | "report";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>("upload");
+  const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [uploadId, setUploadId] = useState<string | undefined>();
   const [projectId, setProjectId] = useState<string | undefined>();
   const [projectName, setProjectName] = useState<string | undefined>();
@@ -33,6 +34,10 @@ export default function App() {
           </div>
         </div>
         <nav className="nav-list" aria-label="Primary">
+          <button className={activeTab === "dashboard" ? "active" : ""} onClick={() => setActiveTab("dashboard")}>
+            <LayoutDashboard size={18} />
+            Dashboard
+          </button>
           <button className={activeTab === "upload" ? "active" : ""} onClick={() => setActiveTab("upload")}>
             <UploadCloud size={18} />
             Upload
@@ -64,8 +69,17 @@ export default function App() {
               setProjectId(nextProjectId);
               setProjectName(nextProjectName);
               setMolecules(nextMolecules);
-              setActiveTab("sar");
+              setActiveTab("dashboard");
             }}
+          />
+        )}
+        {activeTab === "dashboard" && (
+          <DashboardPage
+            uploadId={uploadId}
+            projectId={projectId}
+            projectName={projectName}
+            molecules={molecules}
+            onNavigate={(tab) => setActiveTab(tab)}
           />
         )}
         {activeTab === "molecules" && <MoleculeTable uploadId={uploadId} molecules={molecules} onMoleculesChange={setMolecules} />}

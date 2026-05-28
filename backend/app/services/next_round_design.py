@@ -8,6 +8,8 @@ from app.services.column_inference import infer_assay_columns
 from app.services.design_ideas import _canonical_smiles_set, _generated_analogs
 from app.services.design_preferences import apply_preference_profile
 from app.services.medchem_alerts import medchem_alerts
+from app.services.property_predictions import predict_property_plugins
+from app.services.retrosynthesis import propose_retrosynthesis_route
 from app.services.synthetic_feasibility import score_synthetic_feasibility
 
 
@@ -108,6 +110,14 @@ def _candidate_from_analog(
     if constraints.get("prefer_one_step_from_existing") and feasibility["score"] < 0.48:
         return None
 
+    route = propose_retrosynthesis_route(
+        smiles=smiles,
+        source_smiles=seed.get("smiles"),
+        transform_title=analog.get("title"),
+        synthetic_feasibility=feasibility,
+    )
+    property_predictions = predict_property_plugins(smiles, descriptors=descriptors, alerts=alerts)
+
     return {
         "smiles": smiles,
         "name": f"NRD-{seed.get('id')}-{_slug(analog.get('title', 'analog'))}",
@@ -127,6 +137,8 @@ def _candidate_from_analog(
         "supporting_evidence": _supporting_evidence(seed, analog, potency_column, admet_columns),
         "synthetic_note": feasibility["reason"],
         "synthetic_feasibility": feasibility,
+        "retrosynthesis_route": route,
+        "property_predictions": property_predictions,
         "alerts": alerts,
         "predicted_descriptors": descriptors,
         "descriptor_deltas": analog.get("descriptor_deltas") or {},

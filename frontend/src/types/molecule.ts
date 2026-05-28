@@ -54,6 +54,42 @@ export interface UploadResponse {
   molecules: MoleculeRecord[];
 }
 
+export interface CommercialCatalog {
+  id: string;
+  filename: string;
+  source_type: string;
+  compound_count: number;
+  created_at: string;
+}
+
+export interface CommercialCatalogUpload {
+  catalog: CommercialCatalog;
+  imported_count: number;
+  skipped_count: number;
+}
+
+export interface CommercialAnalogHit {
+  compound_id: number;
+  catalog_id: string;
+  vendor: string | null;
+  catalog_number: string | null;
+  name: string | null;
+  smiles: string;
+  similarity: number;
+  availability: string;
+  properties: Record<string, number | string | null>;
+  descriptor_deltas: Record<string, number | string | null>;
+  rationale: string;
+}
+
+export interface CommercialAnalogSearch {
+  target_smiles: string;
+  searched_count: number;
+  min_similarity: number;
+  hits: CommercialAnalogHit[];
+  metadata: Record<string, unknown>;
+}
+
 export interface AssayColumnInference {
   name: string;
   role: string;
@@ -303,6 +339,56 @@ export interface SyntheticFeasibility {
   features: Record<string, number | string | null>;
 }
 
+export interface RetrosynthesisStep {
+  order: number;
+  title: string;
+  operation: string;
+  disconnection: string;
+  starting_materials: string[];
+  reagent_smiles: string[];
+  product_smiles: string;
+  conditions: string;
+  rationale: string;
+}
+
+export interface RetrosynthesisPathNode {
+  id: string;
+  label: string;
+  role: "starting_material" | "intermediate" | "target" | string;
+  smiles: string | null;
+  note: string;
+}
+
+export interface RetrosynthesisRoute {
+  summary: string;
+  route_type: string;
+  confidence: "high" | "medium" | "low" | string;
+  starting_materials: string[];
+  target_smiles: string;
+  path_nodes: RetrosynthesisPathNode[];
+  steps: RetrosynthesisStep[];
+  route_risks: string[];
+  chemist_note: string;
+}
+
+export interface PropertyPredictionPlugin {
+  id: string;
+  name: string;
+  family: string;
+  level: "favorable" | "caution" | "risk" | string;
+  score: number;
+  value: number | string;
+  unit: string | null;
+  rationale: string;
+  evidence: string[];
+}
+
+export interface PropertyPredictionBundle {
+  source: string;
+  overall_level: "favorable" | "caution" | "risk" | string;
+  plugins: PropertyPredictionPlugin[];
+}
+
 export interface NextRoundRecommendation {
   smiles: string;
   name: string;
@@ -322,6 +408,8 @@ export interface NextRoundRecommendation {
   supporting_evidence: string[];
   synthetic_note: string;
   synthetic_feasibility: SyntheticFeasibility;
+  retrosynthesis_route: RetrosynthesisRoute;
+  property_predictions: PropertyPredictionBundle;
   alerts: PropertyAlert[];
   predicted_descriptors: Record<string, number | string | null>;
   descriptor_deltas: Record<string, number | string | null>;

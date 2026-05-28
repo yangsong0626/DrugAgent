@@ -59,6 +59,30 @@ DESIGN_FEEDBACK_COLUMNS = (
     "updated_at",
 )
 
+COMMERCIAL_CATALOG_COLUMNS = (
+    "id",
+    "filename",
+    "source_type",
+    "compound_count",
+    "created_at",
+)
+
+COMMERCIAL_COMPOUND_COLUMNS = (
+    "id",
+    "catalog_id",
+    "vendor",
+    "catalog_number",
+    "name",
+    "smiles",
+    "properties_json",
+    "mol_weight",
+    "logp",
+    "hbd",
+    "hba",
+    "tpsa",
+    "rotatable_bonds",
+)
+
 
 def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
     ensure_runtime_dirs()
@@ -140,6 +164,41 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(project_id, smiles),
                 FOREIGN KEY(project_id) REFERENCES projects(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS commercial_catalogs (
+                id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'commercial',
+                compound_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        commercial_catalog_columns = {row["name"] for row in conn.execute("PRAGMA table_info(commercial_catalogs)").fetchall()}
+        if "source_type" not in commercial_catalog_columns:
+            conn.execute("ALTER TABLE commercial_catalogs ADD COLUMN source_type TEXT NOT NULL DEFAULT 'commercial'")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS commercial_compounds (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                catalog_id TEXT NOT NULL,
+                vendor TEXT,
+                catalog_number TEXT,
+                name TEXT,
+                smiles TEXT NOT NULL,
+                properties_json TEXT NOT NULL DEFAULT '{}',
+                mol_weight REAL,
+                logp REAL,
+                hbd INTEGER,
+                hba INTEGER,
+                tpsa REAL,
+                rotatable_bonds INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(catalog_id) REFERENCES commercial_catalogs(id)
             )
             """
         )
@@ -380,3 +439,76 @@ def update_cluster_ids(cluster_assignments: dict[int, int]) -> None:
             "UPDATE molecules SET cluster_id = ? WHERE id = ?",
             [(cluster_id, molecule_id) for molecule_id, cluster_id in cluster_assignments.items()],
         )
+
+
+def create_commercial_catalog(catalog_id: str, filename: str, records: Iterable[dict[str, Any]], source_type: str = "commercial") -> dict[str, Any]:
+    records = list(records)
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO commercial_catalogs (id, filename, source_type, compound_count) VALUES (?, ?, ?, ?)",
+            (catalog_id, filename, source_type, len(records)),
+        )
+        for record in records:
+            conn.execute(
+                """
+                INSERT INTO commercial_compounds (
+                    catalog_id, vendor, catalog_number, name, smiles, properties_json,
+                    mol_weight, logp, hbd, hba, tpsa, rotatable_bonds
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    catalog_id,
+                    record.get("vendor"),
+                    record.get("catalog_number"),
+                    record.get("name"),
+                    record["smiles"],
+                    json.dumps(record.get("properties", {})),
+                    record.get("mol_weight"),
+                    record.get("logp"),
+                    record.get("hbd"),
+                    record.get("hba"),
+                    record.get("tpsa"),
+                    record.get("rotatable_bonds"),
+                ),
+            )
+        row = conn.execute(
+            f"SELECT {', '.join(COMMERCIAL_CATALOG_COLUMNS)} FROM commercial_catalogs WHERE id = ?",
+            (catalog_id,),
+        ).fetchone()
+    return dict(row)
+
+
+def list_commercial_catalogs() -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT {', '.join(COMMERCIAL_CATALOG_COLUMNS)} FROM commercial_catalogs ORDER BY created_at DESC"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_commercial_catalog(catalog_id: str) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            f"SELECT {', '.join(COMMERCIAL_CATALOG_COLUMNS)} FROM commercial_catalogs WHERE id = ?",
+            (catalog_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_commercial_compounds(catalog_id: str | None = None) -> list[dict[str, Any]]:
+    query = f"SELECT {', '.join(COMMERCIAL_COMPOUND_COLUMNS)} FROM commercial_compounds"
+    params: tuple[Any, ...] = ()
+    if catalog_id:
+        query += " WHERE catalog_id = ?"
+        params = (catalog_id,)
+    query += " ORDER BY id DESC"
+    with get_connection() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [_commercial_row_to_dict(row) for row in rows]
+
+
+def _commercial_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    data = {key: row[key] for key in row.keys()}
+    data["properties"] = json.loads(data.pop("properties_json") or "{}")
+    return data

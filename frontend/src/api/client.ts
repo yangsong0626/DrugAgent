@@ -2,6 +2,9 @@ import type {
   BriefingReport,
   ClusterSummary,
   ColumnInference,
+  CommercialAnalogSearch,
+  CommercialCatalog,
+  CommercialCatalogUpload,
   CompoundDesignIdeas,
   DecisionLogRecord,
   DesignFeedbackRecord,
@@ -46,7 +49,10 @@ async function fetchApi(path: string, initFactory?: () => RequestInit): Promise<
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error("Could not reach the API server");
+  if (lastError instanceof TypeError) {
+    throw new Error("Could not reach the DrugAgent API server. Start the backend on port 8000 or 8001, then retry the upload.");
+  }
+  throw lastError instanceof Error ? lastError : new Error("Could not reach the DrugAgent API server");
 }
 
 async function parseJson<T>(response: Response): Promise<T> {
@@ -109,6 +115,43 @@ export async function uploadProjectCompoundFile(projectId: string, file: File): 
     };
   });
   return parseJson<UploadResponse>(response);
+}
+
+export async function uploadCommercialCatalog(file: File): Promise<CommercialCatalogUpload> {
+  const response = await fetchApi("/api/commercial/catalogs", () => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("source_type", "enamine_real");
+    return {
+      method: "POST",
+      body: formData,
+    };
+  });
+  return parseJson<CommercialCatalogUpload>(response);
+}
+
+export async function fetchCommercialCatalogs(): Promise<CommercialCatalog[]> {
+  const response = await fetchApi("/api/commercial/catalogs");
+  return parseJson<CommercialCatalog[]>(response);
+}
+
+export async function searchCommercialAnalogs(params: {
+  targetSmiles: string;
+  catalogId?: string;
+  minSimilarity?: number;
+  limit?: number;
+}): Promise<CommercialAnalogSearch> {
+  const response = await fetchApi("/api/commercial/analogs/search", () => ({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target_smiles: params.targetSmiles,
+      catalog_id: params.catalogId || null,
+      min_similarity: params.minSimilarity ?? 0.7,
+      limit: params.limit ?? 20,
+    }),
+  }));
+  return parseJson<CommercialAnalogSearch>(response);
 }
 
 export async function fetchMolecules(uploadId?: string): Promise<MoleculeRecord[]> {

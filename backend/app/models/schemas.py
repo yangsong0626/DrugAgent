@@ -79,6 +79,49 @@ class UploadResponse(BaseModel):
     molecules: List[MoleculeRecord]
 
 
+class CommercialCatalogRecord(BaseModel):
+    id: str
+    filename: str
+    source_type: str = "commercial"
+    compound_count: int
+    created_at: str
+
+
+class CommercialCatalogUploadResponse(BaseModel):
+    catalog: CommercialCatalogRecord
+    imported_count: int
+    skipped_count: int
+
+
+class CommercialAnalogSearchRequest(BaseModel):
+    target_smiles: str
+    catalog_id: Optional[str] = None
+    min_similarity: float = Field(default=0.7, ge=0.0, le=1.0)
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class CommercialAnalogHit(BaseModel):
+    compound_id: int
+    catalog_id: str
+    vendor: Optional[str] = None
+    catalog_number: Optional[str] = None
+    name: Optional[str] = None
+    smiles: str
+    similarity: float
+    availability: str
+    properties: Dict[str, Any] = Field(default_factory=dict)
+    descriptor_deltas: Dict[str, Any] = Field(default_factory=dict)
+    rationale: str
+
+
+class CommercialAnalogSearchResponse(BaseModel):
+    target_smiles: str
+    searched_count: int
+    min_similarity: float
+    hits: List[CommercialAnalogHit] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class AssayColumnInference(BaseModel):
     name: str
     role: str
@@ -244,6 +287,56 @@ class SyntheticFeasibility(BaseModel):
     features: Dict[str, Any] = Field(default_factory=dict)
 
 
+class RetrosynthesisStep(BaseModel):
+    order: int
+    title: str
+    operation: str
+    disconnection: str
+    starting_materials: List[str] = Field(default_factory=list)
+    reagent_smiles: List[str] = Field(default_factory=list)
+    product_smiles: str
+    conditions: str
+    rationale: str
+
+
+class RetrosynthesisPathNode(BaseModel):
+    id: str
+    label: str
+    role: str
+    smiles: Optional[str] = None
+    note: str
+
+
+class RetrosynthesisRoute(BaseModel):
+    summary: str
+    route_type: str
+    confidence: str
+    starting_materials: List[str] = Field(default_factory=list)
+    target_smiles: str
+    path_nodes: List[RetrosynthesisPathNode] = Field(default_factory=list)
+    steps: List[RetrosynthesisStep] = Field(default_factory=list)
+    route_risks: List[str] = Field(default_factory=list)
+    chemist_note: str
+
+
+class PropertyPredictionPlugin(BaseModel):
+    id: str
+    name: str
+    family: str
+    level: str
+    score: float
+    value: Any
+    unit: Optional[str] = None
+    rationale: str
+    evidence: List[str] = Field(default_factory=list)
+
+
+class PropertyPredictionBundle(BaseModel):
+    source: str
+    overall_level: str
+    plugins: List[PropertyPredictionPlugin] = Field(default_factory=list)
+
+
 class NextRoundRecommendation(BaseModel):
     smiles: str
     name: str
@@ -263,6 +356,8 @@ class NextRoundRecommendation(BaseModel):
     supporting_evidence: List[str] = Field(default_factory=list)
     synthetic_note: str
     synthetic_feasibility: SyntheticFeasibility
+    retrosynthesis_route: RetrosynthesisRoute
+    property_predictions: PropertyPredictionBundle
     alerts: List[PropertyAlert] = Field(default_factory=list)
     predicted_descriptors: Dict[str, Any] = Field(default_factory=dict)
     descriptor_deltas: Dict[str, Any] = Field(default_factory=dict)
